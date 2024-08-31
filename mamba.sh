@@ -2,7 +2,7 @@
 #SBATCH --account=def-arashmoh
 #SBATCH --gpus-per-node=1
 #SBATCH --mem=16000M               # memory per node
-#SBATCH --time=0-01:00
+#SBATCH --time=0-12:00
 #SBATCH --mail-user=<jamal73sm@gmail.com>
 #SBATCH --mail-type=ALL
 
