@@ -530,7 +530,7 @@ def main(args):
                      'n_parameters': n_parameters}
         
         # log about
-        if args.local_rank == 0 and args.gpu == 0:
+        if args.local_rank == 0:
             for key, value in log_stats.items():
                 mlflow.log_metric(key, value, log_stats['epoch'])
         
