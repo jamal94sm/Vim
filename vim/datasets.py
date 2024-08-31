@@ -56,8 +56,8 @@ class INatDataset(ImageFolder):
 def build_dataset(is_train, args):
     transform = build_transform(is_train, args)
 
-    if args.data_set == 'CIFAR':
-        dataset = datasets.CIFAR10(args.data_path, train=is_train, transform=transform, download=True)
+    if args.data_set == 'MNIST':
+        dataset = datasets.MNIST(args.data_path, train=is_train, transform=transform, download=True)
         nb_classes = 10
     elif args.data_set == 'IMNET':
         root = os.path.join(args.data_path, 'train' if is_train else 'val')
