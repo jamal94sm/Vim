@@ -1,0 +1,25 @@
+https://newsletter.maartengrootendorst.com/p/a-visual-guide-to-mamba-and-state
+
+Vision mamba:    https://github.com/hustvl/Vim/tree/6143d07b3dd31f904c63840a19e22d95d1124493
+
+MedMamba:        https://github.com/YubiaoYue/MedMamba/tree/main
+
+Pretrained Vim:  https://gist.github.com/Dexterp37/d004909d8138f06c270b530a6abb983c
+		 https://www.a2p.it/machine-learning/pretrained-vision-mamba-minimal-example/
+
+
+https://colab.research.google.com/drive/1Vf4g0PfYnO5yzYQX_LpYCV7vLc0V92l9?authuser=1#scrollTo=zN9A18brLCTl
+
+
+
+
+cd /home/shahab33/projects/def-arashmoh/shahab33/
+
+source ~/Mamba/bin/activate
+
+My github: https://github.com/jamal94sm/Vim.git
+rm -r Vim
+
+
+pip show numpy
+pip list
