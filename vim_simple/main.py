@@ -32,6 +32,9 @@ import utils
 # log about
 import mlflow
 
+from torchvision import datasets, transforms
+from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
@@ -237,7 +240,34 @@ def main():
     batch_size = 64
     num_workers = 10 #?
 
-######################################################################
+###################################################################### DATA
+    ### Dataset  
+    def build_transform(input_size, eval_crop_ratio):
+        resize_im = input_size > 32
+        t = []
+        if resize_im:
+            size = int(input_size / eval_crop_ratio)
+            t.append(
+                transforms.Resize(size, interpolation=3),  # to maintain same ratio w.r.t. 224 images
+            )
+            t.append(transforms.CenterCrop(input_size))
+    
+        t.append(transforms.ToTensor())
+        t.append(transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD))
+        return transforms.Compose(t)
+    
+    
+    eval_crop_ratio = 0.875
+    # MNIST
+    #dataset = datasets.MNIST('Vim/data_set/', train=is_train, transform=transform, download=True)
+
+    # CIFAR
+    nb_classes = 10
+    input_size = 32
+    transform = build_transform (input_size, eval_crop_ratio)
+    dataset_train = datasets.CIFAR10('Vim/data_set/', train=True, transform=transform, download=True)
+    dataset_val = datasets.CIFAR10('Vim/data_set/', train=False, transform=transform, download=True)
+
     sampler_train = torch.utils.data.RandomSampler(dataset_train)
     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     
@@ -256,198 +286,54 @@ def main():
     )
 
 
-    ##########################################################
-    print(f"Creating model: {args.model}")
+    ########################################################## MODEL
+    model = vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2
+    print(f"Creating model: {model}")
     model = create_model(
-        args.model,
+        model,
         pretrained=False,
-        num_classes=args.nb_classes,
-        drop_rate=args.drop,
-        drop_path_rate=args.drop_path,
+        num_classes=nb_classes,
+        drop_rate=0.0,
+        drop_path_rate=0.1,
         drop_block_rate=None,
-        img_size=args.input_size
+        img_size=input_size
     )
-
-                    
-    if args.finetune:
-        if args.finetune.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.finetune, map_location='cpu', check_hash=True)
-        else:
-            checkpoint = torch.load(args.finetune, map_location='cpu')
-
-        checkpoint_model = checkpoint['model']
-        state_dict = model.state_dict()
-        for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
-
-        # interpolate position embedding
-        pos_embed_checkpoint = checkpoint_model['pos_embed']
-        embedding_size = pos_embed_checkpoint.shape[-1]
-        num_patches = model.patch_embed.num_patches
-        num_extra_tokens = model.pos_embed.shape[-2] - num_patches
-        # height (== width) for the checkpoint position embedding
-        orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
-        # height (== width) for the new position embedding
-        new_size = int(num_patches ** 0.5)
-        # class_token and dist_token are kept unchanged
-        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-        # only the position tokens are interpolated
-        pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-        pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
-        pos_tokens = torch.nn.functional.interpolate(
-            pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
-        pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-        new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
-        checkpoint_model['pos_embed'] = new_pos_embed
-
-        model.load_state_dict(checkpoint_model, strict=False)
-        
-    if args.attn_only:
-        for name_p,p in model.named_parameters():
-            if '.attn.' in name_p:
-                p.requires_grad = True
-            else:
-                p.requires_grad = False
-        try:
-            model.head.weight.requires_grad = True
-            model.head.bias.requires_grad = True
-        except:
-            model.fc.weight.requires_grad = True
-            model.fc.bias.requires_grad = True
-        try:
-            model.pos_embed.requires_grad = True
-        except:
-            print('no position encoding')
-        try:
-            for p in model.patch_embed.parameters():
-                p.requires_grad = False
-        except:
-            print('no patch embed')
-            
-    model.to(device)
-
-    model_ema = None
-    if args.model_ema:
-        # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
-        model_ema = ModelEma(
-            model,
-            decay=args.model_ema_decay,
-            device='cpu' if args.model_ema_force_cpu else '',
-            resume='')
-
-    model_without_ddp = model
-    if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
-        model_without_ddp = model.module
+    
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
 
-    if not args.unscale_lr:
-        linear_scaled_lr = args.lr * args.batch_size * utils.get_world_size() / 512.0
-        args.lr = linear_scaled_lr
-    optimizer = create_optimizer(args, model_without_ddp)
-    
-    # amp about
-    amp_autocast = suppress
-    loss_scaler = "none"
-    if args.if_amp:
-        amp_autocast = torch.cuda.amp.autocast
-        loss_scaler = NativeScaler()
+    args = SimpleNamespace()
+    args.sched = 'cosine'
+    args.clip_grad = None
+    args.weight_decay = 0
+    args.lr = 1e-4
+    args.opt = 'adam' 
+    args.momentum = 0.9
 
+    optimizer = create_optimizer(args, model)
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
-    criterion = LabelSmoothingCrossEntropy()
+    criterion = torch.nn.CrossEntropyLoss()
 
-    if mixup_active:
-        # smoothing is handled with mixup label transform
-        criterion = SoftTargetCrossEntropy()
-    elif args.smoothing:
-        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
+    output_dir = Path(output_dir)
         
-    if args.bce_loss:
-        criterion = torch.nn.BCEWithLogitsLoss()
-        
-    teacher_model = None
-    if args.distillation_type != 'none':
-        assert args.teacher_path, 'need to specify teacher-path when using distillation'
-        print(f"Creating teacher model: {args.teacher_model}")
-        teacher_model = create_model(
-            args.teacher_model,
-            pretrained=False,
-            num_classes=args.nb_classes,
-            global_pool='avg',
-        )
-        if args.teacher_path.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.teacher_path, map_location='cpu', check_hash=True)
-        else:
-            checkpoint = torch.load(args.teacher_path, map_location='cpu')
-        teacher_model.load_state_dict(checkpoint['model'])
-        teacher_model.to(device)
-        teacher_model.eval()
-
-    # wrap the criterion in our custom DistillationLoss, which
-    # just dispatches to the original criterion if args.distillation_type is 'none'
-    criterion = DistillationLoss(
-        criterion, teacher_model, args.distillation_type, args.distillation_alpha, args.distillation_tau
-    )
-
-    output_dir = Path(args.output_dir)
-    if args.resume:
-        if args.resume.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
-        else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(checkpoint['model'])
-
-        # add ema load
-        if args.model_ema:
-                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-
-        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
-            if args.model_ema:
-                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-            if 'scaler' in checkpoint and args.if_amp: # change loss_scaler if not amp
-                loss_scaler.load_state_dict(checkpoint['scaler'])
-            elif 'scaler' in checkpoint and not args.if_amp:
-                loss_scaler = 'none'
-        lr_scheduler.step(args.start_epoch)
-        
-    if args.eval:
-        test_stats = evaluate(data_loader_val, model, device, amp_autocast)
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-
-        test_stats = evaluate(data_loader_val, model_ema.ema, device, amp_autocast)
-        print(f"Accuracy of the ema network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        return
-    
-
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
-    for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            data_loader_train.sampler.set_epoch(epoch)
+    epochs = 20
+    amp_autocast = suppress
+    loss_scaler = "none
+    for epoch in range(0, epochs):
 
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
             optimizer, device, epoch, loss_scaler, amp_autocast,
-            args.clip_grad, model_ema, mixup_fn,
-            set_training_mode=args.train_mode,  # keep in eval mode for deit finetuning / train mode for training and deit III finetuning
-            args=args,
+            args.clip_grad,
+            args=args
         )
 
         lr_scheduler.step(epoch)
-        if args.output_dir:
+        if output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({
@@ -466,7 +352,7 @@ def main():
         
         if max_accuracy < test_stats["acc1"]:
             max_accuracy = test_stats["acc1"]
-            if args.output_dir:
+            if output_dir:
                 checkpoint_paths = [output_dir / 'best_checkpoint.pth']
                 for checkpoint_path in checkpoint_paths:
                     utils.save_on_master({
