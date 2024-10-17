@@ -47,7 +47,7 @@ def main():
     cudnn.benchmark = True
     
     # log about
-    output_dir = ''
+    output_dir = 'Vim/vim_simple/output_dir/'
     local_rank = 0 #?
     run_name = output_dir.split("/")[-1]
     
