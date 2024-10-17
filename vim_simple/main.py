@@ -136,7 +136,7 @@ def main():
     max_accuracy = 0.0
     epochs = 20
     amp_autocast = suppress
-    loss_scaler = "none
+    loss_scaler = "none"
     for epoch in range(0, epochs):
 
         train_stats = train_one_epoch(
