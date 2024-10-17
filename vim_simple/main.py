@@ -39,7 +39,7 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 def main():
     # fix the seed for reproducibility
     seed = 0
-    seed = seed + get_rank()
+    seed = seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
     # random.seed(seed)
