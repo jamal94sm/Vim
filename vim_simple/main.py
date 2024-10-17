@@ -219,84 +219,44 @@ def get_args_parser():
     return parser
 
 
-def main(args):
-    utils.init_distributed_mode(args)
-
-    print(args)
-
-    if args.distillation_type != 'none' and args.finetune and not args.eval:
-        raise NotImplementedError("Finetuning with distillation not yet supported")
-
-    device = torch.device(args.device)
-
+def main():
     # fix the seed for reproducibility
-    seed = args.seed + utils.get_rank()
+    seed = 0
+    seed = seed + get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
     # random.seed(seed)
-
+    
     cudnn.benchmark = True
-
+    
     # log about
-    run_name = args.output_dir.split("/")[-1]
-    if args.local_rank == 0:
-        mlflow.start_run(run_name=run_name)
-        for key, value in vars(args).items():
-            mlflow.log_param(key, value)
+    output_dir = ''
+    local_rank = 0 #?
+    run_name = output_dir.split("/")[-1]
+    
+    batch_size = 64
+    num_workers = 10 #?
 
-    dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
-    dataset_val, _ = build_dataset(is_train=False, args=args)
-
-    if args.distributed:
-        num_tasks = utils.get_world_size()
-        global_rank = utils.get_rank()
-        if args.repeated_aug:
-            sampler_train = RASampler(
-                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-            )
-        else:
-            sampler_train = torch.utils.data.DistributedSampler(
-                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-            )
-        if args.dist_eval:
-            if len(dataset_val) % num_tasks != 0:
-                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                      'equal num of samples per-process.')
-            sampler_val = torch.utils.data.DistributedSampler(
-                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
-        else:
-            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-    else:
-        sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-
+######################################################################
+    sampler_train = torch.utils.data.RandomSampler(dataset_train)
+    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    
+    
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
+        batch_size=batch_size,
+        num_workers=num_workers,
         drop_last=True,
     )
-    if args.ThreeAugment:
-        data_loader_train.dataset.transform = new_data_aug_generator(args)
-
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val, sampler=sampler_val,
-        batch_size=int(1.5 * args.batch_size * 20),
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
+        batch_size=int(1.5 * batch_size * 20),
+        num_workers=num_workers,
         drop_last=False
     )
 
-    mixup_fn = None
-    mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
-    if mixup_active:
-        mixup_fn = Mixup(
-            mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
-            prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
-            label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
+    ##########################################################
     print(f"Creating model: {args.model}")
     model = create_model(
         args.model,
@@ -470,9 +430,6 @@ def main(args):
         print(f"Accuracy of the ema network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         return
     
-    # log about
-    if args.local_rank == 0:
-        mlflow.log_param("n_parameters", n_parameters)
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
@@ -523,19 +480,8 @@ def main(args):
                     }, checkpoint_path)
             
         print(f'Max accuracy: {max_accuracy:.2f}%')
-
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()},
-                     'epoch': epoch,
-                     'n_parameters': n_parameters}
         
-        # log about
-        if args.local_rank == 0 and args.gpu == 0:
-            for key, value in log_stats.items():
-                mlflow.log_metric(key, value, log_stats['epoch'])
-        
-        
-        if args.output_dir and utils.is_main_process():
+        if output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
@@ -545,8 +491,6 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
-    args = parser.parse_args()
-    if args.output_dir:
-        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    main(args)
+    if output_dir:
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+    main()
