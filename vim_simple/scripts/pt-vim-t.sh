@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python Vim/vim/main.py 
+python Vim/vim_simple/main.py 
