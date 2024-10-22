@@ -11,4 +11,4 @@ module purge
 module load python
 source ~/Mamba/bin/activate
 
-python Vim/vim/main.py --batch-size 8 --drop-path 0.0 --weight-decay 0.1 
+python Vim/pytorch_visionmamba/pytorch_visionmamba.py 
